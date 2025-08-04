@@ -467,10 +467,10 @@ def compute_prices(group, TimeList):
     Times = [entry_cb_time] + ExitTimeList
     #Returns = [ ((p - entry_cb_price)/entry_cb_price) if entry_cb_price is not None and entry_cb_price != 0 else None for p in Prices ]
     
-    Returns = [
-    ((p - entry_cb_price) / entry_cb_price) if p is not None and entry_cb_price is not None and entry_cb_price != 0 else None
+    LogReturns = [
+    (np.log(p) - np.log(entry_cb_price)) if p is not None and entry_cb_price is not None and entry_cb_price != 0 else None
     for p in Prices
-]
+]  
     
     Drawdowns = [0] + DrawdownList
     Re_TIMELIST = ['entry'] + [str(item) for item in TimeList] + ['break'] + ['close']
@@ -479,12 +479,12 @@ def compute_prices(group, TimeList):
         'HoldTime': Re_TIMELIST,
         'Time': Times,
         'TradePrice': Prices,
-        'Return': Returns,
+        'LogReturn': LogReturns,
         'Drawdown': Drawdowns
         
         })
 
-##############PART 10: Get Returns of one Time List
+##############PART 10: Get Returns of one Time List(from entry_time to every exit time)
 
 def GET_Returns(trade_date_str, df, limit_ups , TimeList):
     
@@ -512,6 +512,231 @@ def GET_Returns(trade_date_str, df, limit_ups , TimeList):
     return result_df
 
 
+##############PART 11: Get LagReturns prepared for forecasting
+
+def LAG_Returns(dt_ticker, Lag, LIMIT_UP_TIME, GAP = '1min'):
+    
+    ######### Attention ! 目前LIMIT_UP_TIME和Lag在这里被使用
+    ###### 得到延迟一定时间后的收益/价格的变动走势
+    dt = dt_ticker[(dt_ticker['FunctionCode'] != 'C') & (dt_ticker['TradeVolume'] > 0)].copy()
+    dt.sort_values(by = 'date_time', inplace = True)
+    
+    
+    ###### GET T0 every usseful data 
+    LIMIT_UP_TIME = pd.to_datetime(LIMIT_UP_TIME)
+    after_limitup_diff = pd.Series(dt['date_time'] - LIMIT_UP_TIME)
+    
+    if after_limitup_diff.empty:
+    
+        entry_cb_price = None
+        print('No data after limit_up_time,Type 1 Error')
+        
+        resampled = pd.DataFrame()
+        
+    else:
+        try:
+            
+            #### Calculate The enter Price(买入转债的时间）
+            entry_idx_min = after_limitup_diff.abs().idxmin()
+            entry_cb_price = dt.loc[entry_idx_min, 'TradePrice']
+            
+            #### Calculate the log return from limit_up_time
+            dt.set_index('date_time', inplace = True)
+            resampled = dt.resample(GAP).agg(
+                  {
+                    'TradePrice': 'mean'
+                  })
+            
+            ######## 其实我是存疑的
+            resampled['log_return_min'] = np.log(resampled['TradePrice']) - np.log(entry_cb_price)  #.shift(-Lag)原先再TradePrice先做了一个延迟，做未来的收益
+            
+            before_entry = resampled.index < LIMIT_UP_TIME
+            resampled.loc[before_entry, 'log_return_min'] = -resampled.loc[before_entry, 'log_return_min']
+            
+            resampled['log_return'] = resampled['log_return_min'].rolling(window = 5, min_periods = 1).mean()
+            
+            resampled['cumulative_log_return'] = resampled['log_return'].dropna().cumsum()
+            
+        except (ValueError, KeyError, IndexError):
+                
+            entry_cb_price = None
+            print('Type 2 Error, something wrong in index or key-value')
+    
+    
+    return resampled
 
 
+##############PART 12: Get correlation coefficients of Factors and Lag_Returns to test the quality of factors
+
+def GET_IC(df_factor, df_return):
+
+      common_valid_idx = (df_factor[df_factor.notna()].index).intersection(df_return[df_return.notna()].index)
+      
+      valid_factor = df_factor.loc[common_valid_idx]
+      valid_return = df_return.loc[common_valid_idx]
+      
+      IC,pval = spearmanr(valid_factor, valid_return)
+
+      return pd.Series({'IC': IC, 'P-Value': pval})
+
+
+##############PART 13: Calculate the ICs of factors and order by the coefficients
+
+def ParaSelection(dt_ticker,LIMIT_UP_TIME, GAP, Lag, Win):
+
+    df_factors = Factors(dt_ticker, LIMIT_UP_TIME, Win ,GAP )
+    df_returns = LAG_Returns(dt_ticker, Lag , LIMIT_UP_TIME , GAP)
+    
+    res = df_factors.apply(lambda col: GET_IC(col, df_returns['log_return']), axis=0)
+    res = res.T
+    
+    res.index = ['trade_amount_growth', 'trade_amount_slope', 'amount_slope_growth', 'amount_rel_entry', 'trade_count_growth', 
+    'trade_count_slope', 'count_slope_growth', 'buy_ratio', 'delta_buy_ratio', 'log_return_3GAP', 'momentum',
+    'momentum_decay', 'impact_cost', 'order_depth_diff', 'order_diff_growth']
+
+    res.sort_values(by = 'IC', inplace = True)
+    
+    return res
+
+##############PART 14: visualize the changing 'log-return' of one event(fixed ticker and fixed trade_date)  
+
+def ReturnDist(df_return, LIMIT_UP_TIME, BREAK_LIMIT_UP_TIME):
+
+    resampled = df_return.copy()
+    resampled.set_index('date_time', inplace = True)
+    resampled.index = pd.to_datetime(resampled.index)
+    
+    # 设置绘图为上下堆叠
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+
+    # 上面绘制对数收益率的变化
+    ax1.plot(resampled.index, resampled['log_return'], label='Log Return')
+    ax1.axvline(LIMIT_UP_TIME, color='red', linestyle='--', label='LIMIT UP Time')
+    ax1.axvline(BREAK_LIMIT_UP_TIME, color='green', linestyle='--', label='BREAK_LIMIT UP Time')
+    ax1.set_ylabel('Log Return')
+    ax1.set_title('Log Return of Convertible Bonds over Time')
+    ax1.grid(True)
+    ax1.legend()
+
+    # 下面绘制累计收益CAR的变化
+    ax2.plot(resampled.index, resampled['cumulative_log_return'], label='Cumulative Log Return', color='orange')
+    ax2.axvline(LIMIT_UP_TIME, color='red', linestyle='--', label='LIMIT UP Time')
+    ax2.axvline(BREAK_LIMIT_UP_TIME, color='green', linestyle='--', label='BREAK_LIMIT UP Time')
+    ax2.set_xlabel('Time')
+    ax2.set_ylabel('Cumulative Log Return')
+    ax2.set_title('Cumulative Log Return over Time')
+    ax2.grid(True)
+    ax2.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+
+##############PART 15: visualize the changing 'log-return' of fixed trade_date
+
+def GET_Dist_EveryDate(trade_date_str, df, limit_ups):
+
+    df = df.reset_index(drop=True)
+    dff = df[(df['FunctionCode'] != 'C') & (df['TradeVolume'] > 0)].copy()
+    df_limit_ups = limit_ups[limit_ups['Date'] == trade_date_str].copy()
+    
+    dfx = dff.merge(df_limit_ups[['Ticker', 'LIMIT_UP_TIME', 'BREAK_LIMIT_UP_TIME']], on = 'Ticker', how = 'left')
+    dfx['LIMIT_UP_TIME'] = pd.to_datetime(dfx['LIMIT_UP_TIME']) 
+    dfx['BREAK_LIMIT_UP_TIME'] =  pd.to_datetime(dfx['BREAK_LIMIT_UP_TIME']) 
+    
+    
+    df_returns = dfx.groupby('Ticker').apply(lambda group: LAG_Returns(dt_ticker = group, Lag = 0, LIMIT_UP_TIME = group['LIMIT_UP_TIME'].iloc[0],
+                         GAP = '1min')).reset_index()
+    print(df_returns.columns)                   
+    Tickers = dfx['Ticker'].drop_duplicates().tolist()
+    print(Tickers)
+    
+    for t in Tickers:
+    
+        df_return = df_returns[df_returns['Ticker'] == t].copy()
+        LIMIT_UP_TIME = df_limit_ups[df_limit_ups['Ticker'] == t]['LIMIT_UP_TIME'].iloc[0]
+        BREAK_LIMIT_UP_TIME = df_limit_ups[df_limit_ups['Ticker'] == t]['BREAK_LIMIT_UP_TIME'].iloc[0]
+    
+        print(df_return.head(5))
+        print(LIMIT_UP_TIME)
+        print(BREAK_LIMIT_UP_TIME)
+    
+        ReturnDist(df_return, LIMIT_UP_TIME, BREAK_LIMIT_UP_TIME)
+                         
+
+##############PART 16: visualize the hist distribution of LogReturns of different HoldTime
+
+def Dist(data_list, title_list):
+    """
+    Parameter:
+    - data_list: LogReturns dataframe of several HoldTime
+    - title_list: HoldTime Labels
+
+    """
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    axes = axes.flatten()
+    
+    # 存储最高频率点的收益值和频率，用于连线
+    peaks = []
+
+    for i, data in enumerate(data_list):
+        ax = axes[i]
+        # 绘制直方图
+        counts, bins, patches = ax.hist(data, bins=100, alpha=0.7, color='skyblue')
+    
+        # 找到最高频率点的索引
+        max_idx = np.argmax(counts)
+        peak_freq = counts[max_idx]
+        peak_bin_center = (bins[max_idx] + bins[max_idx + 1]) / 2    
+        
+        # 标注最高频率点，使用绿色
+
+        ax.axvline(peak_bin_center, color='green',alpha=1.0, linestyle='--', lw=1.0, label='Mode Log Return')            
+
+        # 画平均值直线，颜色改为蓝色
+        mean_value = data.mean()
+        ax.axvline(mean_value, color='red', alpha=0.6, linestyle='--', lw=1.0 ,label='Mean Log Return')
+
+        # 在右上角添加文本显示平均值
+        ax.text(0.95, 0.95, f'Mean: {mean_value:.4f}',
+                transform=ax.transAxes,
+                fontsize=10,
+                verticalalignment='top',
+                horizontalalignment='right',
+                bbox=dict(facecolor='white', alpha=0.6, edgecolor='none'))
+                
+        ax.text(0.95, 0.9, f'Mode: {peak_bin_center:.4f}',
+                transform=ax.transAxes,
+                fontsize=10,
+                verticalalignment='top',
+                horizontalalignment='right',
+                bbox=dict(facecolor='white', alpha=0.6, edgecolor='none'))        
+
+    
+        # 记录最高点，用于连线
+        peaks.append((peak_bin_center, peak_freq))
+    
+        ax.set_title(title_list[i])
+        ax.set_xlabel(f'{title_list[2][6:]}')
+        ax.set_ylabel('Frequency')
+        ax.grid(True)
+
+    plt.tight_layout()
+    plt.show()
+
+
+##############PART 17: T test of LogReturns of one HoldTime strategy
+def T_test(df_return):
+
+    t_stat, p_value = stats.ttest_1samp(df_return, 0)
+    
+    df = len(df_return) - 1  
+    
+    if t_stat > 0:
+        p_one_sided = 1 - stats.t.cdf(t_stat, df)
+    else:
+        p_one_sided = stats.t.cdf(t_stat, df)
+        
+    return t_stat, p_one_sided    
 
