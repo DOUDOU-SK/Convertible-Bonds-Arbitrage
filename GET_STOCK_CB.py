@@ -314,9 +314,202 @@ def Factors(group, Win ,GAP = '1min', FixTime = True):
         ans = resampled[cols].copy()
 
         return ans
+
+##############PART 6: Get Factors at target trading date
+
+def GET_Factors(trade_date_str, df, limit_ups , Win ,GAP = '1min', FixTime = True): 
     
+    print(f'Process Trading Date is : {trade_date_str}')
+    
+    ###### Here the df is NOT Stock, df IS convertible bond
+    df = df.reset_index(drop=True)
+    dff = df[(df['FunctionCode'] != 'C') & (df['TradeVolume'] > 0)].copy()
+    
+    df_limit_ups = limit_ups[limit_ups['Date'] == trade_date_str].copy()
+    
+    dfx = dff.merge(df_limit_ups[['Ticker', 'LIMIT_UP_TIME', 'BREAK_LIMIT_UP_TIME']], on = 'Ticker', how = 'left')
+    dfx['LIMIT_UP_TIME'] = pd.to_datetime(dfx['LIMIT_UP_TIME'])
+    dfx['BREAK_LIMIT_UP_TIME'] = pd.to_datetime(dfx['BREAK_LIMIT_UP_TIME'])
+ 
+    
+    ### result_df 是一个dataframe, 包含：Ticker, LIMIT_UP_TIME, entry_cb_price三列
+    result_df = dfx.groupby('Ticker').apply(lambda group: Factors(group, Win ,GAP, FixTime)).reset_index()
+    
+    if not result_df.empty:
+        print(f'GET Valid Result on trading date {trade_date_str}')
+    else:
+        print(f'Something Wrong happends on trading date {trade_date_str}')
+        
+    return result_df
+
+##############PART 7: Adjust the Exit Time with EntryTime and HoldTime
+morning_start = pd.to_datetime("09:25:00").time()
+morning_end = pd.to_datetime("11:30:00").time()
+
+afternoon_start = pd.to_datetime("13:00:00").time()
+afternoon_end = pd.to_datetime("15:00:00").time()
+
+def adjust_exit_time(entry_cb_time, x):
+    
+    entry_cb_time_x = pd.to_datetime(entry_cb_time)
+    
+    ### x可以是负数，相应地往前平移一段时间
+    exit_time = entry_cb_time_x + timedelta(seconds=x*60)
+    
+    exit_dt = pd.Timestamp(exit_time)
+    morning_end_dt = exit_dt.replace(hour=11, minute=30, second=0, microsecond=0)
+    
+    ##分区间讨论
+    if morning_end < exit_dt.time() < afternoon_start:
+        overshoot_seconds = (exit_dt - morning_end_dt).total_seconds()
+        exit_time = exit_dt.replace(hour=13, minute=0, second=0, microsecond=0) + timedelta(seconds=overshoot_seconds)
+        
+    elif exit_dt.time() > afternoon_end:  
+        exit_time = exit_dt.replace(hour=15, minute=0, second=0, microsecond=0)
+        
+    elif  exit_dt.time() < morning_start:
+        
+        exit_time = exit_dt.replace(hour=9, minute=25, second=0, microsecond=0)
+        
+    return exit_time
+
+##############PART 8: Get the valid TradePrice at corresponding time
+
+def GET_PRICE_AT_TIME(group, Time): 
+    
+    # 要确保Time和'date_time'的数据类型都是datetime
+    
+    tempt = group[(group['FunctionCode'] != 'C') & (group['TradeVolume']>0)].copy()
+    time_dff = pd.Series(tempt['date_time'] - Time)
+    
+    if time_dff.empty:
+        
+        price = None
+        print('time_diff is none')
+    else:
+        try:
+            time_idx_min = time_dff.abs().idxmin()
+            price = tempt.loc[time_idx_min, 'TradePrice']     
+            
+        except (ValueError, KeyError, IndexError):
+                
+            price = None
+            print('second error')
+    
+    return price             
 
 
+##############PART 9: Get the maximum drawdown of one event 
+
+def GET_Drawdown(group, entry_cb_time, exit_time):
+    
+    xy_temp = group.copy()
+
+    xy_slice = xy_temp[(xy_temp['FunctionCode'] != 'C')& (xy_temp['TradeVolume']>0) &
+            (xy_temp['date_time'] >= entry_cb_time) & (xy_temp['date_time'] <= exit_time)
+    ].copy()
+    
+    
+    xy_slice['peak'] = xy_slice['TradePrice'].cummax()
+    xy_slice['drawdown'] = (xy_slice['peak'] - xy_slice['TradePrice']) / xy_slice['peak']
+    
+    ### 最大回撤与最大回撤发生的时刻
+    max_dd = xy_slice['drawdown'].max()*100 # 把它转变成百分数
+    #max_dd_time = xy_slice.loc[xy_slice['drawdown'].idxmax(), 'datetime']
+    
+    return max_dd 
+
+##############PART 10: Get Prices of one Time List
+
+def compute_prices(group, TimeList):
+    
+    ######## 确认转债的入场时间，也即是对应正股的涨停时间，并计算转债入场时的入场价格
+
+    limit_up_time = pd.to_datetime(group['LIMIT_UP_TIME'].iloc[0])
+    break_cb_time = pd.to_datetime(group['BREAK_LIMIT_UP_TIME'].iloc[0])
+    
+    entry_cb_time = limit_up_time
+    
+    after_limitup_diff = pd.Series(group['date_time'] - limit_up_time)
+    
+    if after_limitup_diff.empty:
+    
+        entry_cb_price = None
+        print('No data after limit_up_time, entry_cb_price is none')
+        
+    else:
+        try:
+            
+            #### Calculate The enter Price(买入转债的时间）
+            entry_idx_min = after_limitup_diff.abs().idxmin()
+            entry_cb_price = group.loc[entry_idx_min, 'TradePrice']  
+                
+        except (ValueError, KeyError, IndexError):
+                # 发生异常时，也将price设为None
+            entry_cb_price = None
+            print('Type 2 Error, entry_cb_price is none')
+
+    ######## 获取其余离场时间对应的离场价格
+        
+    ExitTimeList_raw = [ adjust_exit_time(entry_cb_time, x) for x in TimeList] 
+    
+    close_time = pd.Timestamp(entry_cb_time).replace(hour=15, minute=0, second=0, microsecond=0)
+    
+    ExitTimeList = ExitTimeList_raw + [break_cb_time] + [close_time]
+        
+    ExitPriceList = [ GET_PRICE_AT_TIME(group, t, entry_cb_time) for t in ExitTimeList ]
+        
+    DrawdownList = [GET_Drawdown(group, entry_cb_time, t) for t in ExitTimeList]
+        
+    #### 对应顺序： TimeList（这个是一部分列名字）, ExitTimeList, ExitPriceList
+        
+    Prices = [entry_cb_price] + ExitPriceList
+    Times = [entry_cb_time] + ExitTimeList
+    #Returns = [ ((p - entry_cb_price)/entry_cb_price) if entry_cb_price is not None and entry_cb_price != 0 else None for p in Prices ]
+    
+    Returns = [
+    ((p - entry_cb_price) / entry_cb_price) if p is not None and entry_cb_price is not None and entry_cb_price != 0 else None
+    for p in Prices
+]
+    
+    Drawdowns = [0] + DrawdownList
+    Re_TIMELIST = ['entry'] + [str(item) for item in TimeList] + ['break'] + ['close']
+        
+    ans = pd.DataFrame({
+        'HoldTime': Re_TIMELIST,
+        'Time': Times,
+        'TradePrice': Prices,
+        'Return': Returns,
+        'Drawdown': Drawdowns
+        
+        })
+
+##############PART 10: Get Returns of one Time List
+
+def GET_Returns(trade_date_str, df, limit_ups , TimeList):
+    
+    print(f'Process Trading Date is : {trade_date_str}')
+    
+    df = df.reset_index(drop=True)
+    ###### Here the df is NOT Stock, df IS convertible bond
+    dff = df[(df['FunctionCode'] != 'C') & (df['TradeVolume'] > 0)].copy()
+    
+    df_limit_ups = limit_ups[limit_ups['Date'] == trade_date_str].copy()
+    
+    dfx = dff.merge(df_limit_ups[['Ticker', 'LIMIT_UP_TIME', 'BREAK_LIMIT_UP_TIME']], on = 'Ticker', how = 'left')
+    dfx['LIMIT_UP_TIME'] = pd.to_datetime(dfx['LIMIT_UP_TIME'])
+    dfx['BREAK_LIMIT_UP_TIME'] = pd.to_datetime(dfx['BREAK_LIMIT_UP_TIME'])
+ 
+    ### result_df 是一个dataframe, 包含：Ticker, LIMIT_UP_TIME, entry_cb_price三列
+    result_df = dfx.groupby('Ticker',  include_groups=True).apply(lambda group: compute_prices(group, TimeList)).reset_index()
+    
+    if not result_df.empty:
+        print(f'GET Valid Result on trading date {trade_date_str}')
+    else:
+        print(f'Something Wrong happends on trading date {trade_date_str}')
+        
+
+    return result_df
 
 
 
