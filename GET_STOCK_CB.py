@@ -9,8 +9,8 @@ import GET_TradingDates
 from GET_TradingDates import read_trading_days
 
 
-############PART 1
-trade_dates_list = read_trading_days(start_date='20200101', end_date='20241231')
+############PART 1:Get All the trading days from 2020 to 2024
+trade_dates_list = pd.read_csv()
 
 
 ##############PART 2
@@ -79,22 +79,22 @@ def GET_LIMIT_UP(trade_date_str, ds_stock, stock):
 
     LIMIT_UP_TIME = ds_stock[ds_stock['TradePrice'] == LIMIT_UP_PRICE]['date_time'].min()
     
-    # Éè¶¨ÈİÈÌÊ±¼ä£¨Õ¨°å < 2·ÖÖÓµÄ²»Ëã£©
+    # è®¾å®šå®¹å¿æ—¶é—´ï¼ˆç‚¸æ¿ < 2åˆ†é’Ÿçš„ä¸ç®—ï¼‰
     TOLERANCE_MINUTES = 2
     TOLERANCE_SECONDS = TOLERANCE_MINUTES * 60
 
-    # Ìí¼Ó±êÖ¾£ºÊÇ·ñµÍÓÚÕÇÍ£¼Û£¨ÊÓÎªÕ¨°å£©
+    # æ·»åŠ æ ‡å¿—ï¼šæ˜¯å¦ä½äºæ¶¨åœä»·ï¼ˆè§†ä¸ºç‚¸æ¿ï¼‰
     ds_stock_x = ds_stock.copy()
     ds_stock_x['is_break'] = ds_stock_x['TradePrice'] < (LIMIT_UP_PRICE - 1e-6)
     
-    # Ö»·ÖÎö entry_cb_time Ö®ºóµÄÊı¾İ
+    # åªåˆ†æ entry_cb_time ä¹‹åçš„æ•°æ®
     after_entry = ds_stock_x[ds_stock_x['date_time'] >= LIMIT_UP_TIME].copy()
     
-    # ±ê¼ÇÊÇ·ñÕ¨°å¶ÎµÄ¿ªÊ¼ºÍ½áÊø£¨ÓÃ·Ö×é±àºÅ·Ö¶Î£©
+    # æ ‡è®°æ˜¯å¦ç‚¸æ¿æ®µçš„å¼€å§‹å’Œç»“æŸï¼ˆç”¨åˆ†ç»„ç¼–å·åˆ†æ®µï¼‰
     after_entry['break_shift'] = after_entry['is_break'].shift(1, fill_value=False)
     after_entry['break_group'] = (after_entry['is_break'] & ~after_entry['break_shift']).cumsum()
 
-    # ÌáÈ¡ËùÓĞÕ¨°å¶Î
+    # æå–æ‰€æœ‰ç‚¸æ¿æ®µ
     break_groups = after_entry[after_entry['is_break']].groupby('break_group')
 
     BREAK_LIMIT_UP_TIME = ds_stock['date_time'].max()
@@ -106,7 +106,7 @@ def GET_LIMIT_UP(trade_date_str, ds_stock, stock):
     
         if duration >= TOLERANCE_SECONDS:
             BREAK_LIMIT_UP_TIME = start_time
-            break  # ÕÒµ½µÚÒ»¸öÓĞĞ§Õ¨°å¶Î¾ÍÍ£Ö¹
+            break  # æ‰¾åˆ°ç¬¬ä¸€ä¸ªæœ‰æ•ˆç‚¸æ¿æ®µå°±åœæ­¢
     
     #print(f'The real time point to leave the market:{BREAK_LIMIT_UP_TIME}')
 
@@ -137,18 +137,18 @@ def Factors(dt_ticker, LIMIT_UP_TIME, GAP = '2T'):
     trade_count_per_sec = dt.resample(GAP).size().rename('TradeCount')
     resampled = resampled.merge(trade_count_per_sec, left_index=True, right_index=True, how='left')
 
-    # log_return_30s£ºÊµ¼ÊÉÏ»ùÓÚ1minÇ°µÄ¼Û¸ñ£¨30s ¡Á 6 = 3mins£©
+    # log_return_30sï¼šå®é™…ä¸ŠåŸºäº1minå‰çš„ä»·æ ¼ï¼ˆ30s Ã— 6 = 3minsï¼‰
     resampled['log_return_6mins'] = np.log(resampled['TradePrice']) - np.log(resampled['TradePrice'].shift(3))
 
-    # 2. trade_rate_amount_30s£º¹ıÈ¥6¸ö10sÄÚµÄ¾ùÖµ³É½»½ğ¶î£¨¼´60s´°¿Ú£©
+    # 2. trade_rate_amount_30sï¼šè¿‡å»6ä¸ª10så†…çš„å‡å€¼æˆäº¤é‡‘é¢ï¼ˆå³60sçª—å£ï¼‰
     resampled['trade_rate_amount_2T'] = resampled['TradeAmount'].rolling(window=6, min_periods=1).mean()
     resampled['trade_rate_count_2T'] = resampled['TradeCount'].rolling(window = 6, min_periods=1).mean()
     resampled['trade_price_2T'] = resampled['TradePrice'].rolling(window=6, min_periods=1).mean()
 
-    # 3. order_depth_diff£ºµ±Ç°ÂòÅÌ - ÂôÅÌ²î
+    # 3. order_depth_diffï¼šå½“å‰ä¹°ç›˜ - å–ç›˜å·®
     resampled['order_depth_diff'] = (resampled['BidOrder'] - resampled['AskOrder'])/(resampled['BidOrder'] + resampled['AskOrder']+1e-6)
     resampled['order_diff_trend'] = resampled['order_depth_diff'].rolling(7).mean().diff()
-    # 4. order_depth_diff_change£ºÅÌ¿Ú·´×ª¼£Ïó£¨¼´²îÖµ±ä»¯£©
+    # 4. order_depth_diff_changeï¼šç›˜å£åè½¬è¿¹è±¡ï¼ˆå³å·®å€¼å˜åŒ–ï¼‰
     resampled['order_depth_change'] = np.sign(resampled['order_depth_diff'] * resampled['order_depth_diff'].shift(1))
 
     
@@ -157,22 +157,23 @@ def Factors(dt_ticker, LIMIT_UP_TIME, GAP = '2T'):
     resampled['is_price_rolling_top'] = resampled['trade_price_2T'] >= resampled['price_rollmax'].shift(1)
 
 
-    # 6. volatility_30s£º×î½ü30s¼Û¸ñ²¨¶¯ÂÊ£¨±ê×¼²î£©
+    # 6. volatility_30sï¼šæœ€è¿‘30sä»·æ ¼æ³¢åŠ¨ç‡ï¼ˆæ ‡å‡†å·®ï¼‰
     resampled['log_volatility'] = resampled['log_return_6mins'].rolling(window=6, min_periods=1).std()
     resampled['log_sharpe'] = np.where(
     resampled['log_volatility'].fillna(0) != 0,
     resampled['log_return_6mins'] / resampled['log_volatility'],
     np.nan  )
     
-    # 7. ¶¯Á¿³ÖĞøĞÔË¥¼õÖ¸±ê£¨Momentum Decay£©
+    # 7. åŠ¨é‡æŒç»­æ€§è¡°å‡æŒ‡æ ‡ï¼ˆMomentum Decayï¼‰
     resampled['momentum'] = resampled['log_return_6mins'].rolling(5).mean()
     resampled['momentum_decay'] = resampled['momentum'].diff()
 
-    # 8. ³É½»Á¿·´×ªÇ¿¶È
+    # 8. æˆäº¤é‡åè½¬å¼ºåº¦
     resampled['trade_amount_growth'] = resampled['trade_rate_amount_2T'].diff()
 
 
     return resampled
+
 
 
 
