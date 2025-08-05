@@ -2,10 +2,8 @@
 
 import pandas as pd 
 import numpy as np 
-from xy.data.query import load_lv2
 from datetime import datetime, time, timedelta 
 import os 
-import datetime
 import pickle 
 from scipy.stats import ttest_ind
 import matplotlib.pyplot as plt
@@ -13,36 +11,40 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
+import GET_STOCK_CB
+from GET_STOCK_CB import 
 
-##########»ù´¡º¯Êı1
+
+##########################################################PART 1: 
+m_start = datetime.time(9, 25)
+m_end = datetime.time(11, 30)
+a_start = datetime.time(13, 0)
+a_end = datetime.time(15, 0)
+
+##########åŸºç¡€å‡½æ•°1
 
 def adjust_break_time(break_time):
     
-    m_start = datetime.time(9, 25)
-    m_end = datetime.time(11, 30)
-    a_start = datetime.time(13, 0)
-    a_end = datetime.time(15, 0)
-        
-    # ÏÈ»ñÈ¡ÆäÊ±¼ä²¿·Ö
+    # å…ˆè·å–å…¶æ—¶é—´éƒ¨åˆ†
     t = break_time.time()
-    # ÅĞ¶ÏÊÇ·ñÔÚÉÏÎçÊ±¼ä¶Î
+    # åˆ¤æ–­æ˜¯å¦åœ¨ä¸Šåˆæ—¶é—´æ®µ
     if m_start <= t <= m_end:
         return break_time
-    # ÅĞ¶ÏÊÇ·ñÔÚÏÂÎçÊ±¼ä¶Î
+    # åˆ¤æ–­æ˜¯å¦åœ¨ä¸‹åˆæ—¶é—´æ®µ
     elif a_start <= t <= a_end:
         return break_time
     else:
-        # ²»ÔÚÔÊĞíÊ±¼ä¶Î£¬µ÷Õûµ½ÏÂÒ»¸öÊ±¼ä¶Î
+        # ä¸åœ¨å…è®¸æ—¶é—´æ®µï¼Œè°ƒæ•´åˆ°ä¸‹ä¸€ä¸ªæ—¶é—´æ®µ
         if t > m_end and t < a_start:
-        # Èç¹ûÔÚÉÏÎçÊ±¼äÖ®ºó£¬µ«Î´µ½ÏÂÎç·¶Î§£¬¿ÉÄÜÔÚ11:30-13:00Ö®¼ä£¬µ÷µ½ÏÂÎç¿ªÊ¼
+        # å¦‚æœåœ¨ä¸Šåˆæ—¶é—´ä¹‹åï¼Œä½†æœªåˆ°ä¸‹åˆèŒƒå›´ï¼Œå¯èƒ½åœ¨11:30-13:00ä¹‹é—´ï¼Œè°ƒåˆ°ä¸‹åˆå¼€å§‹
             return break_time.replace(hour=13, minute=0, second=0)
             
         else:
             return break_time.replace(hour=15, minute=0, second=0)
             
-##########»ù´¡º¯Êı2
+##########åŸºç¡€å‡½æ•°2
 def ExitSingal(after_limitup_df, threshold, weights, smooth_window=4):
-    # ËùĞèµÄ×Ö¶Î
+    # æ‰€éœ€çš„å­—æ®µ
     required_cols = [
         'trade_rate_amount_2T', 'trade_price_2T', 'trade_rate_count_2T',
         'log_return_6mins', 'log_volatility', 'log_sharpe', 'momentum', 'momentum_decay',
@@ -50,22 +52,22 @@ def ExitSingal(after_limitup_df, threshold, weights, smooth_window=4):
     ]
     
     
-    # ¼ì²éÈ±Ê§ÁĞ
+    # æ£€æŸ¥ç¼ºå¤±åˆ—
     missing_cols = [col for col in required_cols if col not in after_limitup_df.columns]
     if missing_cols:
         raise ValueError(f"Missing Columns: {missing_cols}")
     
-    # É¸³ö·Ç¿ÕĞĞ
+    # ç­›å‡ºéç©ºè¡Œ
     valid_idx = after_limitup_df[required_cols].dropna().index
 
     if len(valid_idx) == 0:
-        # ËùÓĞĞÅºÅ¶¼ÎªNaN£¬ÎŞ·¨´¦Àí£¬Ö±½Ó·µ»ØÔ­Ê¼Êı¾İ²¢ÌáÊ¾
+        # æ‰€æœ‰ä¿¡å·éƒ½ä¸ºNaNï¼Œæ— æ³•å¤„ç†ï¼Œç›´æ¥è¿”å›åŸå§‹æ•°æ®å¹¶æç¤º
         print("Warning: All signal rows are NaN-skip exit scoring.")
         after_limitup_df['exit_score'] = np.nan
         after_limitup_df['exit_score_smooth'] = 0
         return after_limitup_df
 
-    # ÌáÈ¡ĞÅºÅ
+    # æå–ä¿¡å·
     signal1 = after_limitup_df.loc[valid_idx, ['trade_rate_amount_2T', 'trade_price_2T', 'trade_rate_count_2T']]
     signal2 = after_limitup_df.loc[valid_idx, ['log_return_6mins', 'log_sharpe', 'momentum', 'momentum_decay']]
     signal3 = after_limitup_df.loc[valid_idx, ['order_depth_diff', 'order_diff_trend']]
@@ -75,7 +77,7 @@ def ExitSingal(after_limitup_df, threshold, weights, smooth_window=4):
     
     
 
-    # ±ê×¼»¯
+    # æ ‡å‡†åŒ–
     try:
         scaler1 = StandardScaler().fit(signal1)
         scaler2 = StandardScaler().fit(signal2)
@@ -93,7 +95,7 @@ def ExitSingal(after_limitup_df, threshold, weights, smooth_window=4):
         after_limitup_df['exit_score_smooth'] = 0
         return after_limitup_df
 
-    # ´ò·ÖÂß¼­
+    # æ‰“åˆ†é€»è¾‘
     exit_score = (
         -weights[0] * scaled1[:, 0] +
         -weights[1] * scaled1[:, 1] +
@@ -110,7 +112,7 @@ def ExitSingal(after_limitup_df, threshold, weights, smooth_window=4):
 
     after_limitup_df.loc[valid_idx, 'exit_score'] = exit_score
 
-    # Éú³ÉÆ½»¬ĞÅºÅÁĞ£¨> threshold Îª´¥·¢ĞÅºÅ£©
+    # ç”Ÿæˆå¹³æ»‘ä¿¡å·åˆ—ï¼ˆ> threshold ä¸ºè§¦å‘ä¿¡å·ï¼‰
     signal_flag = (after_limitup_df['exit_score'] >= threshold).astype(float)
     after_limitup_df['exit_score_smooth'] = (
         signal_flag.rolling(window=smooth_window, min_periods=2).sum().fillna(0)
@@ -136,10 +138,10 @@ def SIMULATE_ONE_TRADE_SIGNAL(limitup_time, stock_df, cb_df, cb_resampled, thres
     
     else:    
     
-        ########### È·¶¨Èë³¡Ê±¼ä Entry Time
+        ########### ç¡®å®šå…¥åœºæ—¶é—´ Entry Time
         entry_cb_time = pd.to_datetime(limitup_time)
         
-        ######### Find the entry_cb_price ÈëÊÖ×ªÕ®Ê±µÄ¼Û¸ñ
+        ######### Find the entry_cb_price å…¥æ‰‹è½¬å€ºæ—¶çš„ä»·æ ¼
         cb_time_diff = pd.Series(cb_df['date_time'] - entry_cb_time)
         if cb_time_diff.empty:
             entry_cb_price = None
@@ -150,32 +152,32 @@ def SIMULATE_ONE_TRADE_SIGNAL(limitup_time, stock_df, cb_df, cb_resampled, thres
                 entry_cb_price = cb_df.loc[idx_min, 'TradePrice']
                 
             except ValueError:
-                # ·¢ÉúÒì³£Ê±£¬Ò²½« price ÉèÎª None
+                # å‘ç”Ÿå¼‚å¸¸æ—¶ï¼Œä¹Ÿå°† price è®¾ä¸º None
                 entry_cb_price = None
 
         
-        ######### ÕÒ³öÕı¹ÉÕ¨°åÀë¿ªÕÇÍ£°åµÄÊ±¼ä Break the Upper Limit Exit Time
+        ######### æ‰¾å‡ºæ­£è‚¡ç‚¸æ¿ç¦»å¼€æ¶¨åœæ¿çš„æ—¶é—´ Break the Upper Limit Exit Time
         
-        # Éè¶¨ÈİÈÌÊ±¼ä£¨Õ¨°å < 2·ÖÖÓµÄ²»Ëã£©
+        # è®¾å®šå®¹å¿æ—¶é—´ï¼ˆç‚¸æ¿ < 2åˆ†é’Ÿçš„ä¸ç®—ï¼‰
         TOLERANCE_MINUTES = 2
         TOLERANCE_SECONDS = TOLERANCE_MINUTES * 60
 
         
-        # ÕÒ³öÕÇÍ£¼Û£¨¿É¼Ó¾«¶È¿ØÖÆ£©
+        # æ‰¾å‡ºæ¶¨åœä»·ï¼ˆå¯åŠ ç²¾åº¦æ§åˆ¶ï¼‰
         limit_up_price = stock_df[(stock_df['date_time'] >= entry_cb_time)]['TradePrice'].max()
         
-        # Ìí¼Ó±êÖ¾£ºÊÇ·ñµÍÓÚÕÇÍ£¼Û£¨ÊÓÎªÕ¨°å£©
+        # æ·»åŠ æ ‡å¿—ï¼šæ˜¯å¦ä½äºæ¶¨åœä»·ï¼ˆè§†ä¸ºç‚¸æ¿ï¼‰
         stock_df_x = stock_df.copy()
         stock_df_x['is_break'] = stock_df_x['TradePrice'] < (limit_up_price - 1e-6)
         
-        # Ö»·ÖÎö entry_cb_time Ö®ºóµÄÊı¾İ
+        # åªåˆ†æ entry_cb_time ä¹‹åçš„æ•°æ®
         after_entry = stock_df_x[stock_df_x['date_time'] >= entry_cb_time].copy()
         
-        # ±ê¼ÇÊÇ·ñÕ¨°å¶ÎµÄ¿ªÊ¼ºÍ½áÊø£¨ÓÃ·Ö×é±àºÅ·Ö¶Î£©
+        # æ ‡è®°æ˜¯å¦ç‚¸æ¿æ®µçš„å¼€å§‹å’Œç»“æŸï¼ˆç”¨åˆ†ç»„ç¼–å·åˆ†æ®µï¼‰
         after_entry['break_shift'] = after_entry['is_break'].shift(1, fill_value=False)
         after_entry['break_group'] = (after_entry['is_break'] & ~after_entry['break_shift']).cumsum()
 
-        # ÌáÈ¡ËùÓĞÕ¨°å¶Î
+        # æå–æ‰€æœ‰ç‚¸æ¿æ®µ
         break_groups = after_entry[after_entry['is_break']].groupby('break_group')
 
         break_time = stock_df['date_time'].max()
@@ -191,7 +193,7 @@ def SIMULATE_ONE_TRADE_SIGNAL(limitup_time, stock_df, cb_df, cb_resampled, thres
         
         print(f'The real time point to leave the upper limit is:{break_time}')
         
-        ################################################################## °´ÕÕµ±ÌìÊÕÅÌÊ±¿ÌÍË³¡µÄÊÕÒæÂÊ        
+        ################################################################## æŒ‰ç…§å½“å¤©æ”¶ç›˜æ—¶åˆ»é€€åœºçš„æ”¶ç›Šç‡        
         exit_price_close = cb_df['TradePrice'].iloc[-1] if not cb_df.empty else np.nan
             
         if entry_cb_price is None:
@@ -200,17 +202,17 @@ def SIMULATE_ONE_TRADE_SIGNAL(limitup_time, stock_df, cb_df, cb_resampled, thres
                 
             pnl_close = (exit_price_close - entry_cb_price) / entry_cb_price
         
-        ################################################################## ÒÔÕı¹ÉÕ¨ÅÌÎªÍË³¡ĞÅºÅµÄÊÕÒæÂÊ 
+        ################################################################## ä»¥æ­£è‚¡ç‚¸ç›˜ä¸ºé€€åœºä¿¡å·çš„æ”¶ç›Šç‡ 
         
-        # Éè¶¨×î¶Ì³Ö²ÖÊ±¼ä
+        # è®¾å®šæœ€çŸ­æŒä»“æ—¶é—´
         MIN_HOLD_SECONDS = MIN_HOLD * 60
         
-        # ÔÚ¿ªÊ¼Ö®Ç°£¬ÏÈ¶¨ÒåÎªÊÕÅÌÍË³¡Ê±¼ä£¬±ÜÃâÎ´±»¸³Öµ
+        # åœ¨å¼€å§‹ä¹‹å‰ï¼Œå…ˆå®šä¹‰ä¸ºæ”¶ç›˜é€€åœºæ—¶é—´ï¼Œé¿å…æœªè¢«èµ‹å€¼
         exit_price_break = exit_price_close
         pnl_break = pnl_close
 
         if pd.notnull(break_time):
-            # ¼ÆËã³Ö¹ÉÊ±¼ä
+            # è®¡ç®—æŒè‚¡æ—¶é—´
             hold_duration = (break_time - entry_cb_time).total_seconds()
             
             if hold_duration < MIN_HOLD_SECONDS:
@@ -220,34 +222,34 @@ def SIMULATE_ONE_TRADE_SIGNAL(limitup_time, stock_df, cb_df, cb_resampled, thres
                 print(f"Time holding the Ticker is {MIN_HOLD_SECONDS} seconds, then change the Breakleave time to {break_time}")
 
             try:
-                # ÊÔÍ¼»ñÈ¡·ûºÏÌõ¼şµÄ½»Ò×¼Û¸ñ
+                # è¯•å›¾è·å–ç¬¦åˆæ¡ä»¶çš„äº¤æ˜“ä»·æ ¼
                 exit_price_series = cb_df[cb_df['date_time'] >= break_time]['TradePrice']
                 
                 if not exit_price_series.empty:
                     exit_price_break = exit_price_series.iloc[0]
                 else:
-                # Ã»ÓĞÂú×ãÌõ¼şµÄÊı¾İ
+                # æ²¡æœ‰æ»¡è¶³æ¡ä»¶çš„æ•°æ®
                     exit_price_break = exit_price_close
-                # ¼ÆËãÓ¯¿÷
+                # è®¡ç®—ç›ˆäº
                 if entry_cb_price is None:
                     pnl_break = np.nan
                 else:
                     pnl_break = (exit_price_break - entry_cb_price) / entry_cb_price
             except:
-            # ²¶»ñÖ¸Êı´íÎó»òÆäËûÒì³££¬È·±£±äÁ¿ÒÑ¶¨Òå
+            # æ•è·æŒ‡æ•°é”™è¯¯æˆ–å…¶ä»–å¼‚å¸¸ï¼Œç¡®ä¿å˜é‡å·²å®šä¹‰
                 exit_price_break = exit_price_close
                 pnl_break = pnl_close
         else:
-        # Ã»ÓĞbreak_time»òÎªnullµÄÇé¿ö
+        # æ²¡æœ‰break_timeæˆ–ä¸ºnullçš„æƒ…å†µ
             exit_price_break = exit_price_close
             pnl_break = pnl_close
                 
         
-        ################################################################## ÒÔ¶àÒò×ÓĞÅºÅÎª´¥·¢ÍË³¡Ìõ¼şµÄÊÕÒæÂÊ        
+        ################################################################## ä»¥å¤šå› å­ä¿¡å·ä¸ºè§¦å‘é€€åœºæ¡ä»¶çš„æ”¶ç›Šç‡        
         cb_resampled.reset_index(inplace = True)
         cb_resampled['date_time'] = pd.to_datetime(cb_resampled['date_time'], errors='coerce')
         
-        ####### Ê±¼äÏŞÖÆ¼°ÆäÉ¸Ñ¡
+        ####### æ—¶é—´é™åˆ¶åŠå…¶ç­›é€‰
         time_part = cb_resampled['date_time'].dt.time
         
         time_condition = (
@@ -257,8 +259,8 @@ def SIMULATE_ONE_TRADE_SIGNAL(limitup_time, stock_df, cb_df, cb_resampled, thres
         entry_cb_time = pd.to_datetime(limitup_time)
         after_limitup_df_raw = cb_resampled[ (cb_resampled['date_time'] >= entry_cb_time) &time_condition].copy()
 
-        # Èë³¡Ç°µÄ³É½»Á¿½»Ò×Á¿»ù×¼ #
-        # ¼ì²éÊ±¼ä²îĞòÁĞÊÇ·ñÎª¿Õ
+        # å…¥åœºå‰çš„æˆäº¤é‡äº¤æ˜“é‡åŸºå‡† #
+        # æ£€æŸ¥æ—¶é—´å·®åºåˆ—æ˜¯å¦ä¸ºç©º
         resampled_time_diff = pd.Series(cb_resampled['date_time'] - entry_cb_time)
         
         if resampled_time_diff.empty:
@@ -274,23 +276,23 @@ def SIMULATE_ONE_TRADE_SIGNAL(limitup_time, stock_df, cb_df, cb_resampled, thres
                 entry_cb_count = cb_resampled.loc[min_idx, 'TradeCount']
                 
             except ValueError:
-                # ·¢ÉúÒì³£Ê±£¬Ò²½« price ÉèÎª None
+                # å‘ç”Ÿå¼‚å¸¸æ—¶ï¼Œä¹Ÿå°† price è®¾ä¸º None
                 entry_cb_amount = cb_resampled['TradeAmount'].iloc[0]
                 entry_cb_count =  cb_resampled['TradeCount'].iloc[0]
         
-        # Ìí¼ÓÈ·±£×îĞ¡³Ö¹ÉÊ±¼äMIN_HOLD_SECONDS
+        # æ·»åŠ ç¡®ä¿æœ€å°æŒè‚¡æ—¶é—´MIN_HOLD_SECONDS
         after_limitup_df_raw['hold_seconds'] = (after_limitup_df_raw['date_time'] - entry_cb_time).dt.total_seconds()
         
         
-        ########################## Step1: ¼ÆËã»ù´¡ĞÅºÅµÄ¶¯Á¿±ä»¯Ö¸±ê£¨ÒÑÓĞ£©
-        #after_limitup_df['order_depth_change'] = np.sign(after_limitup_df['order_depth_diff'] * after_limitup_df['order_depth_diff'].shift(1)) ### ÂòÂô¶©µ¥²îÊÇ·ñ³öÏÖ·´×ª
+        ########################## Step1: è®¡ç®—åŸºç¡€ä¿¡å·çš„åŠ¨é‡å˜åŒ–æŒ‡æ ‡ï¼ˆå·²æœ‰ï¼‰
+        #after_limitup_df['order_depth_change'] = np.sign(after_limitup_df['order_depth_diff'] * after_limitup_df['order_depth_diff'].shift(1)) ### ä¹°å–è®¢å•å·®æ˜¯å¦å‡ºç°åè½¬
         #after_limitup_df['is_price_rolling_top'] = after_limitup_df['trade_price_30s'] >= after_limitup_df['price_rollmax'].shift(1)
         #after_limitup_df['trade_rate_amount_growth'] = after_limitup_df['trade_rate_amount_30s'].diff()
 
         
         after_limitup_df = ExitSingal(after_limitup_df_raw, threshold = thresholdx, weights = weight_lists , smooth_window= smooth_window)
         
-        ############################ Step 4: ¶¯Á¿³Ö²Ö±£»¤»úÖÆ
+        ############################ Step 4: åŠ¨é‡æŒä»“ä¿æŠ¤æœºåˆ¶
         after_limitup_df['keep_holding'] = (
           (after_limitup_df['log_return_6mins'] > 0.03) #& 
           #(after_limitup_df['trade_price_2T'] >= after_limitup_df['price_rollmax'].shift(1)) &
@@ -300,7 +302,7 @@ def SIMULATE_ONE_TRADE_SIGNAL(limitup_time, stock_df, cb_df, cb_resampled, thres
         
         final_exit_mask = ((
           (after_limitup_df['hold_seconds'].fillna(0) >= MIN_HOLD_SECONDS) &
-          (after_limitup_df['exit_score_smooth'].fillna(0) >= trigger_times) & #########Á¬Ğø´¥·¢n´Î²ÅËãÕæÕı´¥·¢ÍË³öÇ¿ÁÒĞÅºÅ
+          (after_limitup_df['exit_score_smooth'].fillna(0) >= trigger_times) & #########è¿ç»­è§¦å‘næ¬¡æ‰ç®—çœŸæ­£è§¦å‘é€€å‡ºå¼ºçƒˆä¿¡å·
           (~after_limitup_df['keep_holding'].fillna(False))) ) #  | (after_limitup_df['order_depth_change'] < 0 )
                  
           #& 
@@ -312,7 +314,7 @@ def SIMULATE_ONE_TRADE_SIGNAL(limitup_time, stock_df, cb_df, cb_resampled, thres
         temp_df = after_limitup_df[final_exit_mask].copy()        
         
 
-        # 3. ÕÒ³öÂú×ãÍË³öĞÅºÅµÄÊ±¼äµãºÍÆä¶ÔÓ¦ÊÕÒæÂÊ
+        # 3. æ‰¾å‡ºæ»¡è¶³é€€å‡ºä¿¡å·çš„æ—¶é—´ç‚¹å’Œå…¶å¯¹åº”æ”¶ç›Šç‡
         exit_time_signal = break_time
         
         if not temp_df.empty and temp_df['date_time'].notnull().all():
@@ -359,19 +361,19 @@ def SIMULATE_ONE_TRADE_SIGNAL(limitup_time, stock_df, cb_df, cb_resampled, thres
         
 
 
-        ########################## Step1: ¹¹½¨µ¥Òò×ÓÍË³öĞÅºÅ£¨Ç÷ÊÆ/·´×ª£©
+        ########################## Step1: æ„å»ºå•å› å­é€€å‡ºä¿¡å·ï¼ˆè¶‹åŠ¿/åè½¬ï¼‰
 #        after_limitup_df['exit_signal_1'] =(
-#            (after_limitup_df['log_return_3mins'] < -0.03) &     ## ¸ºÊÕÒæ
+#            (after_limitup_df['log_return_3mins'] < -0.03) &     ## è´Ÿæ”¶ç›Š
 #            (after_limitup_df['log_return_diff'] < -0) 
 #        )
         
 #        after_limitup_df['exit_signal_2'] = (
-#            (after_limitup_df['order_depth_change'] <= 0)  # Ö÷ÂòÖ÷Âô·´×ª    
+#            (after_limitup_df['order_depth_change'] <= 0)  # ä¸»ä¹°ä¸»å–åè½¬    
 #        )
         
 #        after_limitup_df['exit_signal_3'] = (
-#            (after_limitup_df['TradeCount'] < after_limitup_df['trade_rate_count_30s'] * 0.7)&  ## ÊÕÒæÂÊ¼ÓËÙÏÂµø
-#            (after_limitup_df['trade_rate_amount_growth'] < 0) &  ## Á¿ÄÜ¼õÉÙ
+#            (after_limitup_df['TradeCount'] < after_limitup_df['trade_rate_count_30s'] * 0.7)&  ## æ”¶ç›Šç‡åŠ é€Ÿä¸‹è·Œ
+#            (after_limitup_df['trade_rate_amount_growth'] < 0) &  ## é‡èƒ½å‡å°‘
 #            (after_limitup_df['trade_rate_amount_30s'] < 0.7*after_limitup_df['trade_rate_amount_30s'].rolling(4).mean() )
 #            )
             
@@ -410,7 +412,7 @@ def SIMULATE_ONE_TRADE_SIGNAL(limitup_time, stock_df, cb_df, cb_resampled, thres
 
 
 
-        ########################## Step2: ¹¹½¨¶àÒò×ÓÍË³öĞÅºÅ£¨Ç÷ÊÆ/·´×ª£©
+        ########################## Step2: æ„å»ºå¤šå› å­é€€å‡ºä¿¡å·ï¼ˆè¶‹åŠ¿/åè½¬ï¼‰
         #scaler = StandardScaler()
         #exit_signal1 = after_limitup_df[['trade_rate_amount_30s', 'trade_price_30s', 'trade_rate_count_30s']].copy().dropna()
         #exit_signal2 = after_limitup_df[['log_volatility_3mins', 'momentum', 'momentum_decay']].copy().dropna()
@@ -421,11 +423,11 @@ def SIMULATE_ONE_TRADE_SIGNAL(limitup_time, stock_df, cb_df, cb_resampled, thres
         #exit_signal_scaled3 = scaler.fit_transform(exit_signal3.values)
 
 
-        # Äã¿ÉÒÔÈËÎªÉèÖÃ¼ÓÈ¨×éºÏ£º
+        # ä½ å¯ä»¥äººä¸ºè®¾ç½®åŠ æƒç»„åˆï¼š
         #exit_score = (
-        #        -0.3*exit_signal1[:, 0] +  # ³É½»¶î¼õÉÙ
-        #        -0.5*exit_signal1[:, 1] +  # ¼Û¸ñ×ßÊÆ±ä²î
-        #        -0.2*exit_signal1[:, 2] +  # Âòµ¥¼õÉÙ
+        #        -0.3*exit_signal1[:, 0] +  # æˆäº¤é¢å‡å°‘
+        #        -0.5*exit_signal1[:, 1] +  # ä»·æ ¼èµ°åŠ¿å˜å·®
+        #        -0.2*exit_signal1[:, 2] +  # ä¹°å•å‡å°‘
         #        -0.3*exit_signal2[:, 0] +
         #        -0.4*exit_signal2[:, 1] +
         #        -0.3*exit_signal2[:, 2] +
@@ -434,12 +436,12 @@ def SIMULATE_ONE_TRADE_SIGNAL(limitup_time, stock_df, cb_df, cb_resampled, thres
         #  )
            
 
-        # µÃ·Ö¸ßÓÚãĞÖµ¼´ÍË³ö£¨×¢ÒâÕâÀïÔ½´óÔ½»µ£©
+        # å¾—åˆ†é«˜äºé˜ˆå€¼å³é€€å‡ºï¼ˆæ³¨æ„è¿™é‡Œè¶Šå¤§è¶Šåï¼‰
         #after_limitup_df.loc[after_limitup_df.index, 'exit_score'] = exit_score
         
         
-        ############################ Step3: Æ½»¬ºÏ³É×ÜĞÅºÅ
-        # Æ½»¬ĞÅºÅ£¬±ÜÃâÎó´¥·¢
+        ############################ Step3: å¹³æ»‘åˆæˆæ€»ä¿¡å·
+        # å¹³æ»‘ä¿¡å·ï¼Œé¿å…è¯¯è§¦å‘
         #after_limitup_df.loc[after_limitup_df.index, 'exit_score_smooth'] = (after_limitup_df['exit_score'] >= 2.5).rolling(window=4, min_periods=3).sum()
 
 
@@ -457,17 +459,17 @@ def SIMULATE_ONE_TRADE_SIGNAL(limitup_time, stock_df, cb_df, cb_resampled, thres
         #after_limitup_df['exit_signal_smooth'] = after_limitup_df['exit_signal'].rolling(window=4, min_periods=4).sum()
         #after_limitup_df['trade_rate_amount_growth'] = after_limitup_df['trade_rate_amount_30s'].diff()
 
-        # ×îÖÕ×ÛºÏÍË³öÅĞ¶Ï
+        # æœ€ç»ˆç»¼åˆé€€å‡ºåˆ¤æ–­
         #final_exit_mask = (
-        #        (after_limitup_df['hold_seconds'] >= MIN_HOLD_SECONDS) &  # ÖÁÉÙ³Ö²Ö360Ãë
+        #        (after_limitup_df['hold_seconds'] >= MIN_HOLD_SECONDS) &  # è‡³å°‘æŒä»“360ç§’
          #         (after_limitup_df['exit_signal_smooth'] >= 2) & 
-        #          (after_limitup_df['TradeAmount'] <= entry_cb_amount) & # ÖÁÉÙËµÃ÷ºóĞøÍË³öÊ±µÄ½»Ò×Á¿Ó¦¸Ã±È¸Õ¿ªÊ¼ÒªÉÙÁË£¬ÓĞ´ó²¿·ÖÈËÒÑ¾­ÍËÊĞ
+        #          (after_limitup_df['TradeAmount'] <= entry_cb_amount) & # è‡³å°‘è¯´æ˜åç»­é€€å‡ºæ—¶çš„äº¤æ˜“é‡åº”è¯¥æ¯”åˆšå¼€å§‹è¦å°‘äº†ï¼Œæœ‰å¤§éƒ¨åˆ†äººå·²ç»é€€å¸‚
         #          (after_limitup_df['TradeCount'] <= entry_cb_count)
         #)       
                
     
 
-        ############################# Step5: ×îÖÕÍË³öĞÅºÅÅĞ¶Ï£¬×îÖÕÍË³ö±ê×¼£ºÖÁÉÙ³Ö²ÖÊ±¼ä + ĞÅºÅÇ¿¶È×ã¹» + ¶¯Á¿²»×ã + ³É½»Á¿ÏÂ½µ
+        ############################# Step5: æœ€ç»ˆé€€å‡ºä¿¡å·åˆ¤æ–­ï¼Œæœ€ç»ˆé€€å‡ºæ ‡å‡†ï¼šè‡³å°‘æŒä»“æ—¶é—´ + ä¿¡å·å¼ºåº¦è¶³å¤Ÿ + åŠ¨é‡ä¸è¶³ + æˆäº¤é‡ä¸‹é™
         #final_exit_mask = (
         #  (after_limitup_df_with_exitsignals['hold_seconds'] >= MIN_HOLD_SECONDS) &
         #  (after_limitup_df_with_exitsignals['exit_score_smooth'] >= 2) &
