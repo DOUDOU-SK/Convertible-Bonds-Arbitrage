@@ -690,6 +690,8 @@ class LAG_Returns:
 
     def factors_eval(self, group_factors, group_return):
         ### one group is one event with unique (Ticker, Date)
+        #group_factors.drop(columns = 'Ticker', inplace = True)
+        #group_return.drop(columns = 'date_time', inplace = True)
         res = group_factors.apply(lambda col: self.every_factor_ic(col, group_return['log_return']), axis=0)
         res = res.T
         res.index = ['trade_amount_growth','trade_amount_slope', 'amount_slope_growth', 'amount_rel_entry', 'trade_count_growth', 'trade_count_slope', 'count_slope_growth',
@@ -710,8 +712,8 @@ class LAG_Returns:
             x = date_factors[date_factors['Ticker'] == t].copy()
             y = date_return[date_return['Ticker'] == t].copy()
             res = self.factors_eval(x, y)
-            res['Ticker'] = t 
             res['Date'] = trade_date_str
+            res['Ticker'] = t
             ICs.append(res)
 
         ans = pd.concat(ICs, axis = 0, ignore_index=True)    
@@ -737,7 +739,6 @@ class LAG_Returns:
             date_str: res for date_str, res in zip(unique_dates, resultx) }
         ### resultx_dict 中的values也都是dataframes
         return resultx_dict 
-
 
 
 ##############PART 14: visualize the changing 'log-return' of one event(fixed ticker and fixed trade_date)  
@@ -881,6 +882,7 @@ def T_test(df_return):
         p_one_sided = stats.t.cdf(t_stat, df)
         
     return t_stat, p_one_sided    
+
 
 
 
