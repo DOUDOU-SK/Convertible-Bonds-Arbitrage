@@ -225,6 +225,7 @@ class Factors:
     def get_factors(self, group):
         """
         - group: the slice of transaction data on the target date, split by 'Ticker'
+            one group is one event with unique ('Ticker', 'Date')
         """
         ################################ 初始化数据  ################################
         LIMIT_UP_TIME = pd.to_datetime(group['LIMIT_UP_TIME'].iloc[0])
@@ -321,7 +322,6 @@ class Factors:
         resampled['order_depth_change'] = np.sign(resampled['order_depth_diff'] * resampled['order_depth_diff'].shift(1))
         ######### 7. impact_cost #########
         resampled['impact_cost'] = resampled['TradeAmount'] / (resampled['BidOrder'] + resampled['AskOrder'] + 1e-6)
-
     
         #############################
         if self.FixTime: 
@@ -581,89 +581,164 @@ class ExitReturns:
 
 ##############PART 11: Get LagReturns prepared for forecasting
 
-def LAG_Returns(dt_ticker, Lag, LIMIT_UP_TIME, GAP = '1min'):
-    
-    ######### Attention ! 目前LIMIT_UP_TIME和Lag在这里被使用
-    ###### 得到延迟一定时间后的收益/价格的变动走势
-    dt = dt_ticker[(dt_ticker['FunctionCode'] != 'C') & (dt_ticker['TradeVolume'] > 0)].copy()
-    dt.sort_values(by = 'date_time', inplace = True)
-    
-    
-    ###### GET T0 every usseful data 
-    LIMIT_UP_TIME = pd.to_datetime(LIMIT_UP_TIME)
-    after_limitup_diff = pd.Series(dt['date_time'] - LIMIT_UP_TIME)
-    
-    if after_limitup_diff.empty:
-    
-        entry_cb_price = None
-        print('No data after limit_up_time,Type 1 Error')
-        
-        resampled = pd.DataFrame()
-        
-    else:
-        try:
-            
-            #### Calculate The enter Price(买入转债的时间）
-            entry_idx_min = after_limitup_diff.abs().idxmin()
-            entry_cb_price = dt.loc[entry_idx_min, 'TradePrice']
-            
-            #### Calculate the log return from limit_up_time
-            dt.set_index('date_time', inplace = True)
-            resampled = dt.resample(GAP).agg(
-                  {
-                    'TradePrice': 'mean'
-                  })
-            
-            ######## 其实我是存疑的
-            resampled['log_return_min'] = np.log(resampled['TradePrice']) - np.log(entry_cb_price)  #.shift(-Lag)原先再TradePrice先做了一个延迟，做未来的收益
-            
-            before_entry = resampled.index < LIMIT_UP_TIME
-            resampled.loc[before_entry, 'log_return_min'] = -resampled.loc[before_entry, 'log_return_min']
-            
-            resampled['log_return'] = resampled['log_return_min'].rolling(window = 5, min_periods = 1).mean()
-            
-            resampled['cumulative_log_return'] = resampled['log_return'].dropna().cumsum()
-            
-        except (ValueError, KeyError, IndexError):
-                
-            entry_cb_price = None
-            print('Type 2 Error, something wrong in index or key-value')
-    
-    
-    return resampled
+class LAG_Returns:
 
+    def __init__(self, data_dict, limit_ups, Lag, GAP ='1min'):
+        self.data_dict = data_dict 
+        self.limit_ups = limit_ups
+        self.Lag = Lag
+        self.GAP = GAP
+
+    def get_sclice(self, group):    
+
+        LIMIT_UP_TIME = pd.to_datetime(group['LIMIT_UP_TIME'].iloc[0])
+        dt = group[(group['FunctionCode'] != 'C') & (group['TradeVolume'] > 0)].copy()
+        dt.sort_values(by = 'date_time', inplace = True)
+    
+        ###### GET T0 every usseful data 
+        after_limitup_diff = pd.Series(dt['date_time'] - LIMIT_UP_TIME)
+        
+        if after_limitup_diff.empty:
+            entry_cb_price = None
+            print('No data after limit_up_time,Type 1 Error')
+            resampled = pd.DataFrame()
+        
+        else:
+            try:
+                #### Calculate The enter Price
+                entry_idx_min = after_limitup_diff.abs().idxmin()
+                entry_cb_price = dt.loc[entry_idx_min, 'TradePrice']
+            
+                #### Calculate the log return from limit_up_time
+                dt.set_index('date_time', inplace = True)
+                resampled = dt.resample(self.GAP).agg(
+                      {
+                        'TradePrice': 'mean'
+                      })
+            
+                ######### 原先再TradePrice先做了一个延迟，做未来的收益
+                resampled['log_return_min'] = np.log(resampled['TradePrice'].shift(-Lag)) - np.log(entry_cb_price)  
+            
+                before_entry = resampled.index < LIMIT_UP_TIME
+                resampled.loc[before_entry, 'log_return_min'] = -resampled.loc[before_entry, 'log_return_min']
+            
+                resampled['log_return'] = resampled['log_return_min'].rolling(window = 5, min_periods = 1).mean()
+            
+                resampled['cumulative_log_return'] = resampled['log_return'].dropna().cumsum()
+            
+            except (ValueError, KeyError, IndexError):
+                entry_cb_price = None
+                print('Type 2 Error, something wrong in index or key-value')
+        return resampled
+
+    def every_date_lagreturns(self, trade_date_str, df):
+        print(f'Process Trading Date is : {trade_date_str}')
+        df = df.reset_index(drop=True)
+
+        ###### Here the df is NOT Stock, df IS convertible bond
+        dff = df[(df['FunctionCode'] != 'C') & (df['TradeVolume'] > 0)].copy()
+        df_limit_ups = self.limit_ups[self.limit_ups['Date'] == trade_date_str].copy()
+    
+        dfx = dff.merge(df_limit_ups[['Ticker', 'LIMIT_UP_TIME', 'BREAK_LIMIT_UP_TIME']], on = 'Ticker', how = 'left')
+        dfx['LIMIT_UP_TIME'] = pd.to_datetime(dfx['LIMIT_UP_TIME'])
+ 
+        ### result_df 是一个dataframe, 包含：Ticker, LIMIT_UP_TIME, entry_cb_price三列
+        result_df = dfx.groupby('Ticker').apply(lambda group: self.get_sclice(group)).reset_index()
+    
+        if not result_df.empty:
+            print(f'GET Valid Result on trading date {trade_date_str}')
+        else:
+            print(f'Something Wrong happends on trading date {trade_date_str}')
+        
+        return result_df
+
+    def get_Lagreturns(self):
+        
+        unique_dates = list(self.data_dict.keys())  
+        resultx = Parallel(n_jobs=-1)(
+            delayed(self.every_date_lagreturns)(date_str, self.data_dict[date_str]) for date_str in unique_dates
+        )          
+        resultx_dict = {
+            date_str: res for date_str, res in zip(unique_dates, resultx) } 
+        
+        return resultx_dict
 
 ##############PART 12: Get correlation coefficients of Factors and Lag_Returns to test the quality of factors
 
-def GET_IC(df_factor, df_return):
+ class Evaluate_ICs:
 
-      common_valid_idx = (df_factor[df_factor.notna()].index).intersection(df_return[df_return.notna()].index)
+    def __init__(self, data_dict, limit_ups, Win, GAP, Lag, FixTime = False):
+        ### data_dict is a dictionary of dataframes, where each dataframe is the level-2 transaction data of several Tickers
+        self.data_dict = data_dict 
+        self.limit_ups = limit_ups
+        self.Win = Win
+        self.GAP = GAP
+        self.Lag = Lag
+        self.FixTime = FixTime
+
+    def every_factor_ic(self, df_factor, df_return):
+        ### df_factor is one column of factors of a transaction data 
+        ### df_return is the 'log_return'column of LAG Returns dataset
+        common_valid_idx = (df_factor[df_factor.notna()].index).intersection(df_return[df_return.notna()].index)
+        valid_factor = df_factor.loc[common_valid_idx]
+        valid_return = df_return.loc[common_valid_idx]
       
-      valid_factor = df_factor.loc[common_valid_idx]
-      valid_return = df_return.loc[common_valid_idx]
-      
-      IC,pval = spearmanr(valid_factor, valid_return)
+        IC,pval = spearmanr(valid_factor, valid_return)
+        return pd.Series({'IC': IC, 'P-Value': pval})
 
-      return pd.Series({'IC': IC, 'P-Value': pval})
+    ##############PART 13: Calculate the ICs of factors and order by the coefficients
 
-
-##############PART 13: Calculate the ICs of factors and order by the coefficients
-
-def ParaSelection(dt_ticker,LIMIT_UP_TIME, GAP, Lag, Win):
-
-    df_factors = Factors(dt_ticker, LIMIT_UP_TIME, Win ,GAP )
-    df_returns = LAG_Returns(dt_ticker, Lag , LIMIT_UP_TIME , GAP)
+    def factors_eval(self, group_factors, group_return):
+        ### one group is one event with unique (Ticker, Date)
+        res = group_factors.apply(lambda col: self.every_factor_ic(col, group_return['log_return']), axis=0)
+        res = res.T
+        res.index = ['trade_amount_growth','trade_amount_slope', 'amount_slope_growth', 'amount_rel_entry', 'trade_count_growth', 'trade_count_slope', 'count_slope_growth',
     
-    res = df_factors.apply(lambda col: GET_IC(col, df_returns['log_return']), axis=0)
-    res = res.T
-    
-    res.index = ['trade_amount_growth', 'trade_amount_slope', 'amount_slope_growth', 'amount_rel_entry', 'trade_count_growth', 
-    'trade_count_slope', 'count_slope_growth', 'buy_ratio', 'delta_buy_ratio', 'log_return_3GAP', 'momentum',
-    'momentum_decay', 'impact_cost', 'order_depth_diff', 'order_diff_growth']
+                        'buy_ratio', 'delta_buy_ratio', 'log_return_3GAP', 'momentum', 'momentum_decay', 'impact_cost', 'order_diff_growth', 'order_depth_change']
+        res.sort_values(by = 'IC', inplace = True)
+        ### res is a dataframe with 'IC' and 'P-Value' column
+        return res
 
-    res.sort_values(by = 'IC', inplace = True)
-    
-    return res
+    def every_date_eval(self, trade_date_str, date_factors, date_return):
+        ### date_factors and date_return are dataframes in one Date with several different Tickers
+        ### 由前期的代码可知，date_factors 是含有'Ticker'一列的
+        print(f'Process Trading Date is : {trade_date_str}')
+
+        unique_tickers = date_factors['Ticker'].drop_duplicates().tolist()
+        ICs = []
+        for t in unique_tickers:
+            x = date_factors[date_factors['Ticker'] == t].copy()
+            y = date_return[date_return['Ticker'] == t].copy()
+            res = self.factors_eval(x, y)
+            res['Ticker'] = t 
+            res['Date'] = trade_date_str
+            ICs.append(res)
+
+        ans = pd.concat(ICs, axis = 0, ignore_index=True)    
+
+        return ans
+            
+
+    def factors_check(self):
+        ### 导入必需的参数，初始化特征因子计算类
+        factors = Factors(self.data_dict, self.limit_ups, self.Win, self.GAP, self.FixTime)
+        ##结果是以data_dict中的日期索引一致的字典，字典的日期对应元素为某个日期下所有涨停对应Ticker的特征因子数据集
+        factor_dicts = factors.factor_dicts() 
+        ##结果是以data_dict中的日期索引一致的字典，字典的日期对应元素为某个日期下所有涨停对应Ticker的LAG Returns
+        lagreturns = LAG_Returns(self.data_dict, self.limit_ups, self.Lag, self.GAP)
+        return_dicts = lagreturns.get_Lagreturns()
+
+        unique_dates = list(self.data_dict.keys())
+        resultx = Parallel(n_jobs=-1)(
+            delayed(self.every_date_eval)(date_str, factor_dicts[date_str], return_dicts[date_str]) for date_str in unique_dates
+        ) 
+
+        resultx_dict = {
+            date_str: res for date_str, res in zip(unique_dates, resultx) }
+        ### resultx_dict 中的values也都是dataframes
+        return resultx_dict 
+
+
 
 ##############PART 14: visualize the changing 'log-return' of one event(fixed ticker and fixed trade_date)  
 
@@ -806,6 +881,7 @@ def T_test(df_return):
         p_one_sided = stats.t.cdf(t_stat, df)
         
     return t_stat, p_one_sided    
+
 
 
 
